@@ -237,8 +237,8 @@ Encodes an Image object to file data.
 
 - **image** (`Image`): Image object
 - **format** (`string`): Output format (png, jpeg, webp, etc.)
-- **options** (`ImageFormatEncodeOptions?`): Optional encoding options (format-specific). See [@cross/image documentation](https://cross-image.56k.guru/) for
-  format-specific option types:
+- **options** (`ImageFormatEncodeOptions?`): Optional encoding options (format-specific). See
+  [@cross/image documentation](https://cross-image.56k.guru/) for format-specific option types:
   - PNG/APNG: `PNGEncoderOptions` (compressionLevel: 0-9, default: 6)
   - WebP: `WebPEncoderOptions` (quality: 1-100, lossless: boolean, default: quality: 90)
   - TIFF: `TIFFEncoderOptions` (compression: "none" | "lzw" | "packbits" | "deflate", default: "lzw")

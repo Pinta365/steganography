@@ -39,8 +39,9 @@ export function detectImageFormat(data: Uint8Array): string | null {
  */
 export function isLossyFormat(format: string | null): boolean {
     if (!format) return false;
-    const lossyFormats = ["jpeg", "webp"];
-    return lossyFormats.includes(format.toLowerCase());
+    const formatLower = format.toLowerCase();
+    const lossyFormats = ["jpeg", "jpg", "webp"];
+    return lossyFormats.includes(formatLower);
 }
 
 /**
