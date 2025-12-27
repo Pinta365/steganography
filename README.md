@@ -237,7 +237,7 @@ Encodes an Image object to file data.
 
 - **image** (`Image`): Image object
 - **format** (`string`): Output format (png, jpeg, webp, etc.)
-- **options** (`unknown?`): Optional encoding options (format-specific). See [@cross/image documentation](https://cross-image.56k.guru/) for
+- **options** (`ImageFormatEncodeOptions?`): Optional encoding options (format-specific). See [@cross/image documentation](https://cross-image.56k.guru/) for
   format-specific option types:
   - PNG/APNG: `PNGEncoderOptions` (compressionLevel: 0-9, default: 6)
   - WebP: `WebPEncoderOptions` (quality: 1-100, lossless: boolean, default: quality: 90)
@@ -259,13 +259,14 @@ Creates a new Image object.
 LSB (Least Significant Bit) steganography embeds data in the least significant bits of image pixels. Works with lossless formats (PNG, WebP lossless,
 BMP, etc.). Lossy formats (JPEG) will destroy hidden data on re-encoding.
 
-#### `embedTextInImage(imageData, message, bitDepth?)`
+#### `embedTextInImage(imageData, message, bitDepth?, options?)`
 
 Embeds a text message into image data using LSB (Least Significant Bit).
 
 - **imageData** (`Uint8Array`): RGBA image data
 - **message** (`string`): Text message to embed
 - **bitDepth** (`number?`): Bits per pixel (1-4, default: `1`)
+- **options** (`ImageEncodeOptions?`): Optional encoding options (capacity limits, strict mode)
 - **Returns**: `Uint8Array` - Modified image data
 
 #### `extractTextFromImage(imageData, bitDepth?)`
@@ -276,13 +277,14 @@ Extracts a text message from image data using LSB. The message length is automat
 - **bitDepth** (`number?`): Bits per pixel (1-4, default: `1`)
 - **Returns**: `string` - Extracted text message
 
-#### `embedDataInImage(imageData, data, bitDepth?)`
+#### `embedDataInImage(imageData, data, bitDepth?, options?)`
 
 Embeds binary data into image data using LSB.
 
 - **imageData** (`Uint8Array`): RGBA image data
 - **data** (`Uint8Array`): Binary data to embed
 - **bitDepth** (`number?`): Bits per pixel (1-4, default: `1`)
+- **options** (`ImageEncodeOptions?`): Optional encoding options (capacity limits, strict mode)
 - **Returns**: `Uint8Array` - Modified image data
 
 #### `extractDataFromImage(imageData, dataLength, bitDepth?)`
