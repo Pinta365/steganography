@@ -799,7 +799,9 @@ export async function decodeImage(imageData: Uint8Array): Promise<Image> {
  * - TIFF: TIFFEncoderOptions (compression, grayscale, rgb, cmyk)
  * - Other formats: See @cross/image types
  */
-export type EncodeOptions = unknown;
+// EncodeOptions for image encoding is ImageEncodeOptions (see above)
+// This type is for @cross/image's encode() method options
+export type ImageFormatEncodeOptions = unknown;
 
 /**
  * Encodes an Image object to file data
@@ -813,7 +815,7 @@ export type EncodeOptions = unknown;
 export async function encodeImage(
     image: Image,
     format: string,
-    options?: EncodeOptions,
+    options?: ImageFormatEncodeOptions,
 ): Promise<Uint8Array> {
     // @cross/image's encode method accepts options as second parameter
     return await image.encode(format, options);
