@@ -22,11 +22,11 @@ jobs:
             contents: read
         uses: cross-org/workflows/.github/workflows/bun-ci.yml@main
         with:
-            jsr_dependencies: "@cross/test @std/assert"
+            jsr_dependencies: "@cross/test @std/assert @cross/image"
     node_ci:
         permissions:
             contents: read
         uses: cross-org/workflows/.github/workflows/node-ci.yml@main
         with:
-            jsr_dependencies: "@cross/test @std/assert"
+            jsr_dependencies: "@cross/test @std/assert @cross/image"
             test_target: "test/*.test.ts test/**/*.test.ts"
