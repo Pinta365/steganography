@@ -7,7 +7,15 @@ import { Image, type JPEGComponentCoefficients, type JPEGQuantizedCoefficients }
 
 // Re-export Image type so users don't need to import @cross/image
 export type { Image };
-import { bitsToBytes, bytesToBits, MAX_EMBED_FILE_SIZE, MAX_FILENAME_LENGTH, sanitizeFilename, validateImageDimensions } from "./common.ts";
+import {
+    bitsToBytes,
+    bytesToBits,
+    MAX_EMBED_FILE_SIZE,
+    MAX_FILENAME_LENGTH,
+    MAX_MESSAGE_LENGTH,
+    sanitizeFilename,
+    validateImageDimensions,
+} from "./common.ts";
 
 /**
  * Detects image format from file data using @cross/image's format handlers
@@ -74,15 +82,23 @@ export function embedLSB(
     bitDepth: number = 1,
 ): Uint8Array {
     if (bitDepth < 1 || bitDepth > 4) {
-        throw new Error("Bit depth must be between 1 and 4");
+        throw new Error(
+            `Invalid bit depth: ${bitDepth}. Bit depth must be between 1 and 4 (inclusive). ` +
+                `Higher bit depth increases capacity but may reduce image quality.`,
+        );
     }
 
     const result = new Uint8Array(imageData);
     const maxBits = Math.floor((imageData.length / 4) * 3) * bitDepth;
 
     if (messageBits.length > maxBits) {
+        const maxBytes = Math.floor(maxBits / 8);
+        const gotBytes = Math.ceil(messageBits.length / 8);
         throw new Error(
-            `Message too large. Max capacity: ${maxBits} bits, got: ${messageBits.length} bits`,
+            `Message too large for image capacity. ` +
+                `Required: ${messageBits.length} bits (${gotBytes} bytes), ` +
+                `Available: ${maxBits} bits (${maxBytes} bytes). ` +
+                `Try: shorter message, larger image, or higher bitDepth (1-4).`,
         );
     }
 
@@ -118,7 +134,10 @@ export function extractLSB(
     bitOffset: number = 0,
 ): Uint8Array {
     if (bitDepth < 1 || bitDepth > 4) {
-        throw new Error("Bit depth must be between 1 and 4");
+        throw new Error(
+            `Invalid bit depth: ${bitDepth}. Bit depth must be between 1 and 4 (inclusive). ` +
+                `Higher bit depth increases capacity but may reduce image quality.`,
+        );
     }
 
     const bits = new Uint8Array(bitCount);
@@ -411,8 +430,13 @@ export function embedInCoefficients(
     }
 
     if (bitIndex < messageBits.length) {
+        const capacityBytes = Math.floor(bitIndex / 8);
+        const requiredBytes = Math.ceil(messageBits.length / 8);
         throw new Error(
-            `Message too large. Capacity: ${bitIndex} bits, Required: ${messageBits.length} bits`,
+            `Message too large for JPEG coefficient capacity. ` +
+                `Required: ${messageBits.length} bits (${requiredBytes} bytes), ` +
+                `Available: ${bitIndex} bits (${capacityBytes} bytes). ` +
+                `Try: shorter message, larger image, or enable chroma components (useChroma: true).`,
         );
     }
 
@@ -545,21 +569,73 @@ export function cloneJpegCoefficients(
 }
 
 /**
+ * Options for image encoding functions
+ */
+export interface ImageEncodeOptions {
+    /**
+     * Maximum payload size in bytes
+     * If not specified, uses calculated capacity based on image size and bitDepth
+     */
+    maxPayloadBytes?: number;
+    /**
+     * Maximum message/data length in bytes (before embedding)
+     * If not specified, uses MAX_MESSAGE_LENGTH (10MB)
+     */
+    maxMessageLength?: number;
+    /**
+     * Whether to throw an error if payload exceeds capacity (default: true)
+     * If false, will only warn but still attempt encoding
+     */
+    strictCapacity?: boolean;
+}
+
+/**
  * Helper: Embeds a text message into image data using LSB
  * Automatically handles text-to-bits conversion
  *
  * @param imageData - RGBA image data (Uint8Array)
  * @param message - Text message to embed
  * @param bitDepth - Number of bits per pixel (1-4, default: 1)
+ * @param options - Optional encoding options (capacity limits, strict mode)
  * @returns Modified image data with embedded message
  */
 export function embedTextInImage(
     imageData: Uint8Array,
     message: string,
     bitDepth: number = 1,
+    options?: ImageEncodeOptions,
 ): Uint8Array {
     const encoder = new TextEncoder();
     const messageBytes = encoder.encode(message);
+
+    // Validate message length
+    const maxMessageLength = options?.maxMessageLength ?? MAX_MESSAGE_LENGTH;
+    if (messageBytes.length > maxMessageLength) {
+        throw new Error(
+            `Message too long. ${messageBytes.length} bytes, maximum: ${maxMessageLength} bytes. ` +
+                `Increase maxMessageLength option if needed.`,
+        );
+    }
+
+    // Calculate capacity
+    const pixels = imageData.length / 4;
+    const rgbChannels = pixels * 3; // Skip alpha
+    const capacityBytes = Math.floor((rgbChannels * bitDepth) / 8);
+    const maxCapacity = options?.maxPayloadBytes ?? capacityBytes;
+    const strictMode = options?.strictCapacity ?? true;
+
+    // Check capacity (message + 4-byte header)
+    const requiredBytes = messageBytes.length + 4;
+    if (requiredBytes > maxCapacity) {
+        const message = `Message too large. ${requiredBytes} bytes required, capacity: ${maxCapacity} bytes. ` +
+            `Try: shorter message, larger image, higher bitDepth (1-4), or increase maxPayloadBytes option.`;
+
+        if (strictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
+    }
 
     // Prepend 4-byte length header (little-endian)
     const header = new Uint8Array(4);
@@ -607,13 +683,43 @@ export function extractTextFromImage(
  * @param imageData - RGBA image data (Uint8Array)
  * @param data - Binary data to embed (Uint8Array)
  * @param bitDepth - Number of bits per pixel (1-4, default: 1)
+ * @param options - Optional encoding options (capacity limits, strict mode)
  * @returns Modified image data with embedded data
  */
 export function embedDataInImage(
     imageData: Uint8Array,
     data: Uint8Array,
     bitDepth: number = 1,
+    options?: ImageEncodeOptions,
 ): Uint8Array {
+    // Validate data length
+    const maxMessageLength = options?.maxMessageLength ?? MAX_MESSAGE_LENGTH;
+    if (data.length > maxMessageLength) {
+        throw new Error(
+            `Data too large. ${data.length} bytes, maximum: ${maxMessageLength} bytes. ` +
+                `Increase maxMessageLength option if needed.`,
+        );
+    }
+
+    // Calculate capacity
+    const pixels = imageData.length / 4;
+    const rgbChannels = pixels * 3; // Skip alpha
+    const capacityBytes = Math.floor((rgbChannels * bitDepth) / 8);
+    const maxCapacity = options?.maxPayloadBytes ?? capacityBytes;
+    const strictMode = options?.strictCapacity ?? true;
+
+    // Check capacity
+    if (data.length > maxCapacity) {
+        const message = `Data too large. ${data.length} bytes, capacity: ${maxCapacity} bytes. ` +
+            `Try: smaller data, larger image, higher bitDepth (1-4), or increase maxPayloadBytes option.`;
+
+        if (strictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
+    }
+
     const dataBits = bytesToBits(data);
     return embedLSB(imageData, dataBits, bitDepth);
 }

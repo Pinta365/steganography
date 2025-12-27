@@ -220,7 +220,11 @@ async function decrypt(
     checkCryptoAvailable();
 
     if (data.length < 33) {
-        throw new Error("Encrypted data too short");
+        throw new Error(
+            `Encrypted data too short: ${data.length} bytes. ` +
+                `Expected at least 33 bytes (16-byte salt + 16-byte counter + 1 byte ciphertext). ` +
+                `The data may be corrupted or not encrypted with AES-256-CTR.`,
+        );
     }
 
     const salt = data.slice(0, 16);
@@ -274,7 +278,11 @@ function zwcToBytes(zwcString: string): Uint8Array {
     }
 
     if (digits.length % 4 !== 0) {
-        throw new Error("Invalid ZWC data: length not divisible by 4");
+        throw new Error(
+            `Invalid ZWC data: length ${digits.length} is not divisible by 4. ` +
+                `Each byte requires exactly 4 zero-width characters. ` +
+                `The data may be corrupted or incomplete.`,
+        );
     }
 
     const bytes: number[] = [];
@@ -352,6 +360,7 @@ function distributeZWC(
  * @param secretMessage - The secret text to hide
  * @param password - Optional password for AES-256-CTR encryption
  * @param distribute - If true, distribute ZWC characters throughout text instead of appending
+ * @param options - Optional encoding options (capacity limits, strict mode)
  * @returns The cover text with invisible ZWC payload embedded
  */
 export async function encodeText(
@@ -359,14 +368,65 @@ export async function encodeText(
     secretMessage: string,
     password?: string,
     distribute: boolean = false,
+    options?: EncodeOptions,
 ): Promise<StegaText> {
+    // Validate input sizes
+    const maxSecretLength = options?.maxSecretLength ?? MAX_SECRET_LENGTH;
+    const maxCoverLength = options?.maxCoverLength ?? MAX_COVER_LENGTH;
+
+    if (coverText.length > maxCoverLength) {
+        throw new Error(
+            `Cover text too long. ${coverText.length} chars, maximum: ${maxCoverLength} chars. ` +
+                `Increase maxCoverLength option if needed.`,
+        );
+    }
+
     const encoder = new TextEncoder();
     let data: Uint8Array = new Uint8Array(encoder.encode(secretMessage));
+
+    if (data.length > maxSecretLength) {
+        throw new Error(
+            `Secret message too long. ${data.length} bytes, maximum: ${maxSecretLength} bytes. ` +
+                `Increase maxSecretLength option if needed.`,
+        );
+    }
+
+    // Check capacity before compression/encryption
+    const calculatedCapacity = calculateTextCapacity(coverText);
+    const capacity = options?.maxPayloadBytes ?? calculatedCapacity;
+    const strictMode = options?.strictCapacity ?? true;
+
+    // Estimate final payload size (compression typically reduces by 50-70%, encryption adds ~32 bytes)
+    const estimatedCompressed = Math.ceil(data.length * 0.6); // Conservative estimate
+    const estimatedEncrypted = password ? estimatedCompressed + 32 : estimatedCompressed;
+
+    if (estimatedEncrypted > capacity) {
+        const message = `Payload too large. Estimated ${estimatedEncrypted} bytes, capacity: ${capacity} bytes. ` +
+            `Try: shorter message, longer cover text, or increase maxPayloadBytes option.`;
+
+        if (strictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
+    }
 
     data = new Uint8Array(await compress(data));
 
     if (password) {
         data = new Uint8Array(await encrypt(data, password));
+    }
+
+    // Final capacity check after compression/encryption
+    if (data.length > capacity) {
+        const message = `Payload too large after compression/encryption. ${data.length} bytes, capacity: ${capacity} bytes. ` +
+            `Try: shorter message, longer cover text, or increase maxPayloadBytes option.`;
+
+        if (strictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
     }
 
     // Header format: [1 byte: type][4 bytes: length][data]
@@ -445,14 +505,22 @@ export async function decodeText(
         const dataLength = view.getUint32(1, true);
 
         if (payloadType !== PAYLOAD_TYPE_TEXT) {
-            throw new Error(`Expected text payload (type ${PAYLOAD_TYPE_TEXT}), got type ${payloadType}`);
+            throw new Error(
+                `Payload type mismatch. Expected text payload (type ${PAYLOAD_TYPE_TEXT}), got type ${payloadType}. ` +
+                    `Use decodeBinary() or decode() for binary payloads.`,
+            );
         }
 
         const dataZWCLength = dataLength * 4;
         const totalZWCNeeded = 20 + dataZWCLength;
 
         if (allZWC.length < totalZWCNeeded) {
-            throw new Error("Incomplete data - payload appears truncated");
+            const missing = totalZWCNeeded - allZWC.length;
+            throw new Error(
+                `Incomplete payload data. Expected ${totalZWCNeeded} ZWC characters, got ${allZWC.length}. ` +
+                    `Missing ${missing} characters. ` +
+                    `The payload may be truncated or corrupted.`,
+            );
         }
 
         const dataZWC = allZWC.substring(20, totalZWCNeeded);
@@ -482,6 +550,7 @@ export async function decodeText(
  * @param binaryData - The binary data to hide (Uint8Array)
  * @param password - Optional password for AES-256-CTR encryption
  * @param distribute - If true, distribute ZWC characters throughout text instead of appending
+ * @param options - Optional encoding options (capacity limits, strict mode)
  * @returns The cover text with invisible ZWC payload embedded
  */
 export async function encodeBinary(
@@ -489,13 +558,64 @@ export async function encodeBinary(
     binaryData: Uint8Array,
     password?: string,
     distribute: boolean = false,
+    options?: EncodeOptions,
 ): Promise<StegaText> {
+    // Validate input sizes
+    const maxSecretLength = options?.maxSecretLength ?? MAX_SECRET_LENGTH;
+    const maxCoverLength = options?.maxCoverLength ?? MAX_COVER_LENGTH;
+
+    if (coverText.length > maxCoverLength) {
+        throw new Error(
+            `Cover text too long. ${coverText.length} chars, maximum: ${maxCoverLength} chars. ` +
+                `Increase maxCoverLength option if needed.`,
+        );
+    }
+
+    if (binaryData.length > maxSecretLength) {
+        throw new Error(
+            `Binary data too large. ${binaryData.length} bytes, maximum: ${maxSecretLength} bytes. ` +
+                `Increase maxSecretLength option if needed.`,
+        );
+    }
+
     let data: Uint8Array = new Uint8Array(binaryData);
+
+    // Check capacity before compression/encryption
+    const calculatedCapacity = calculateTextCapacity(coverText);
+    const capacity = options?.maxPayloadBytes ?? calculatedCapacity;
+    const strictMode = options?.strictCapacity ?? true;
+
+    // Estimate final payload size (compression varies, encryption adds ~32 bytes)
+    const estimatedCompressed = Math.ceil(data.length * 0.7); // Conservative estimate for binary
+    const estimatedEncrypted = password ? estimatedCompressed + 32 : estimatedCompressed;
+
+    if (estimatedEncrypted > capacity) {
+        const message = `Payload too large. Estimated ${estimatedEncrypted} bytes, capacity: ${capacity} bytes. ` +
+            `Try: smaller data, longer cover text, or increase maxPayloadBytes option.`;
+
+        if (strictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
+    }
 
     data = new Uint8Array(await compress(data));
 
     if (password) {
         data = new Uint8Array(await encrypt(data, password));
+    }
+
+    // Final capacity check after compression/encryption
+    if (data.length > capacity) {
+        const message = `Payload too large after compression/encryption. ${data.length} bytes, capacity: ${capacity} bytes. ` +
+            `Try: smaller data, longer cover text, or increase maxPayloadBytes option.`;
+
+        if (strictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
     }
 
     // Header format: [1 byte: type][4 bytes: length][data]
@@ -560,14 +680,22 @@ export async function decodeBinary(
         const dataLength = view.getUint32(1, true);
 
         if (payloadType !== PAYLOAD_TYPE_BINARY) {
-            throw new Error(`Expected binary payload (type ${PAYLOAD_TYPE_BINARY}), got type ${payloadType}`);
+            throw new Error(
+                `Payload type mismatch. Expected binary payload (type ${PAYLOAD_TYPE_BINARY}), got type ${payloadType}. ` +
+                    `Use decodeText() or decode() for text payloads.`,
+            );
         }
 
         const dataZWCLength = dataLength * 4;
         const totalZWCNeeded = 20 + dataZWCLength;
 
         if (allZWC.length < totalZWCNeeded) {
-            throw new Error("Incomplete data - payload appears truncated");
+            const missing = totalZWCNeeded - allZWC.length;
+            throw new Error(
+                `Incomplete payload data. Expected ${totalZWCNeeded} ZWC characters, got ${allZWC.length}. ` +
+                    `Missing ${missing} characters. ` +
+                    `The payload may be truncated or corrupted.`,
+            );
         }
 
         const dataZWC = allZWC.substring(20, totalZWCNeeded);
@@ -645,7 +773,12 @@ export async function decode(
         const totalZWCNeeded = 20 + dataZWCLength;
 
         if (allZWC.length < totalZWCNeeded) {
-            throw new Error("Incomplete data - payload appears truncated");
+            const missing = totalZWCNeeded - allZWC.length;
+            throw new Error(
+                `Incomplete payload data. Expected ${totalZWCNeeded} ZWC characters, got ${allZWC.length}. ` +
+                    `Missing ${missing} characters. ` +
+                    `The payload may be truncated or corrupted.`,
+            );
         }
 
         const dataZWC = allZWC.substring(20, totalZWCNeeded);
@@ -674,7 +807,11 @@ export async function decode(
                 binaryData: data,
             };
         } else {
-            throw new Error(`Unknown payload type: ${payloadType}`);
+            throw new Error(
+                `Unknown payload type: ${payloadType}. ` +
+                    `Expected ${PAYLOAD_TYPE_TEXT} (text) or ${PAYLOAD_TYPE_BINARY} (binary). ` +
+                    `The data may be corrupted or from an incompatible version.`,
+            );
         }
     } catch (error) {
         throw new Error(
@@ -838,3 +975,56 @@ export function analyzeZWC(text: string): ZWCStats {
 
 export const MAX_SECRET_LENGTH = 50000; // 50KB uncompressed secret
 export const MAX_COVER_LENGTH = 100000; // 100KB cover text
+
+/**
+ * Options for encoding functions
+ */
+export interface EncodeOptions {
+    /**
+     * Maximum payload size in bytes (after compression, before encryption)
+     * If not specified, uses calculated capacity based on cover text size
+     */
+    maxPayloadBytes?: number;
+    /**
+     * Maximum secret message length in bytes (before compression/encryption)
+     * If not specified, uses MAX_SECRET_LENGTH (50KB)
+     */
+    maxSecretLength?: number;
+    /**
+     * Maximum cover text length in characters
+     * If not specified, uses MAX_COVER_LENGTH (100KB)
+     */
+    maxCoverLength?: number;
+    /**
+     * Whether to throw an error if payload exceeds capacity (default: true)
+     * If false, will only warn but still attempt encoding
+     */
+    strictCapacity?: boolean;
+}
+
+/**
+ * Calculates the capacity for text steganography
+ * Returns the maximum number of bytes that can be hidden in the cover text
+ *
+ * @param coverText - The cover text that will contain hidden data
+ * @returns Maximum payload size in bytes (after compression, before encryption)
+ */
+export function calculateTextCapacity(coverText: string): number {
+    // Each byte requires 4 ZWC characters
+    // Header overhead: 5 bytes = 20 ZWC chars
+    // Sentinel overhead: 6 ZWC chars (START + END)
+    // Total overhead: 26 ZWC chars = 6.5 bytes
+
+    // Estimate available ZWC capacity from cover text length
+    // In distributed mode, we can use insertion points throughout
+    // In appended mode, we can append after the text
+    // Conservative estimate: use cover text length as proxy for available space
+    const estimatedZWC = Math.floor(coverText.length * 0.1); // Assume ~10% can be ZWC without detection
+    const availableZWC = Math.max(estimatedZWC, coverText.length); // At minimum, can append
+
+    // Subtract overhead
+    const payloadZWC = Math.max(0, availableZWC - 26);
+    const payloadBytes = Math.floor(payloadZWC / 4);
+
+    return payloadBytes;
+}

@@ -68,6 +68,71 @@ const extractedMessage = extractTextFromImage(loadedImage.data);
 console.log(extractedMessage); // "Hidden secret message"
 ```
 
+## Capacity and Configuration
+
+### Capacity Calculation
+
+The library automatically calculates capacity based on your cover media:
+
+- **Text Steganography**: Capacity depends on cover text length. Each byte requires ~4 zero-width characters. Use `calculateTextCapacity(coverText)`
+  to check capacity.
+- **Image Steganography**: Capacity depends on image dimensions and bit depth. Use `calculateBitCapacity(width, height, bitDepth)` to check capacity.
+
+### Configurable Limits
+
+All encoding functions support optional configuration via options:
+
+**Text Functions** (`encodeText`, `encodeBinary`):
+
+```typescript
+interface EncodeOptions {
+    maxPayloadBytes?: number; // Override calculated capacity
+    maxSecretLength?: number; // Max secret size (default: 50KB)
+    maxCoverLength?: number; // Max cover text size (default: 100KB)
+    strictCapacity?: boolean; // Throw error vs warn (default: true)
+}
+```
+
+**Image Functions** (`embedTextInImage`, `embedDataInImage`):
+
+```typescript
+interface ImageEncodeOptions {
+    maxPayloadBytes?: number; // Override calculated capacity
+    maxMessageLength?: number; // Max message size (default: 10MB)
+    strictCapacity?: boolean; // Throw error vs warn (default: true)
+}
+```
+
+### Capacity Warnings
+
+By default, the library will throw errors if payload exceeds capacity. Set `strictCapacity: false` to get warnings instead:
+
+```typescript
+// Warns but continues encoding
+const stegaText = await encodeText(cover, secret, undefined, false, {
+    strictCapacity: false,
+});
+```
+
+### Examples
+
+```typescript
+// Check capacity before encoding
+const capacity = calculateTextCapacity(coverText);
+console.log(`Can hide up to ${capacity} bytes`);
+
+// Override capacity limit
+const stegaText = await encodeText(coverText, secret, undefined, false, {
+    maxPayloadBytes: 10000, // Allow up to 10KB
+    maxSecretLength: 20000, // Allow up to 20KB secret
+});
+
+// Use calculated capacity with warnings
+const stegaImage = embedTextInImage(image.data, message, 1, {
+    strictCapacity: false, // Warn instead of error
+});
+```
+
 ## API Reference
 
 ### Types

@@ -82,22 +82,28 @@ export function validateImageDimensions(
     width: number,
     height: number,
 ): void {
-    if (
-        width <= 0 || height <= 0 || !Number.isInteger(width) ||
-        !Number.isInteger(height)
-    ) {
-        throw new Error("Invalid image dimensions");
+    if (!Number.isInteger(width) || !Number.isInteger(height)) {
+        throw new Error(
+            `Invalid image dimensions: width and height must be integers. Got width: ${width}, height: ${height}`,
+        );
+    }
+    if (width <= 0 || height <= 0) {
+        throw new Error(
+            `Invalid image dimensions: width and height must be positive. Got width: ${width}, height: ${height}`,
+        );
     }
     if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
         throw new Error(
-            `Image dimensions too large: ${width}x${height} (maximum ${MAX_IMAGE_DIMENSION}x${MAX_IMAGE_DIMENSION})`,
+            `Image dimensions too large: ${width}x${height} pixels (maximum ${MAX_IMAGE_DIMENSION}x${MAX_IMAGE_DIMENSION} pixels). ` +
+                `Consider resizing the image or increasing MAX_IMAGE_DIMENSION.`,
         );
     }
     const pixelCount = width * height;
     const maxPixels = MAX_IMAGE_DIMENSION * MAX_IMAGE_DIMENSION;
     if (pixelCount > maxPixels) {
         throw new Error(
-            `Image size too large: ${pixelCount} pixels (maximum ${maxPixels})`,
+            `Image size too large: ${pixelCount} pixels (maximum ${maxPixels} pixels, ${MAX_IMAGE_DIMENSION}x${MAX_IMAGE_DIMENSION}). ` +
+                `Consider resizing the image or increasing MAX_IMAGE_DIMENSION.`,
         );
     }
 }
@@ -140,12 +146,16 @@ export function sanitizeFilename(filename: string): string {
  */
 export function validateFileSize(size: number, maxSize: number): void {
     if (size <= 0) {
-        throw new Error("File size must be positive");
+        throw new Error(
+            `Invalid file size: ${size} bytes. File size must be positive.`,
+        );
     }
     if (size > maxSize) {
-        const maxMB = (maxSize / (1024 * 1024)).toFixed(1);
+        const sizeMB = (size / (1024 * 1024)).toFixed(2);
+        const maxMB = (maxSize / (1024 * 1024)).toFixed(2);
         throw new Error(
-            `File too large: ${(size / (1024 * 1024)).toFixed(1)}MB (maximum ${maxMB}MB)`,
+            `File too large: ${sizeMB}MB (${size} bytes), maximum: ${maxMB}MB (${maxSize} bytes). ` +
+                `Consider compressing the file or increasing the maximum size limit.`,
         );
     }
 }
