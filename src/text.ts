@@ -38,62 +38,103 @@ function asStegaText(text: string): StegaText {
 
 /**
  * Compresses data using the native Web CompressionStream API (deflate)
+ * Falls back to Bun's native zlib or Node.js zlib when CompressionStream is unavailable
  */
 async function compress(data: Uint8Array): Promise<Uint8Array> {
-    const cs = new CompressionStream("deflate");
-    const writer = cs.writable.getWriter();
-    const buffer = new Uint8Array(data);
-    writer.write(buffer);
-    writer.close();
+    if (typeof CompressionStream !== "undefined") {
+        const cs = new CompressionStream("deflate");
+        const writer = cs.writable.getWriter();
+        const buffer = new Uint8Array(data);
+        writer.write(buffer);
+        writer.close();
 
-    const chunks: Uint8Array[] = [];
-    const reader = cs.readable.getReader();
+        const chunks: Uint8Array[] = [];
+        const reader = cs.readable.getReader();
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+        }
+
+        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        return result;
     }
 
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-        result.set(chunk, offset);
-        offset += chunk.length;
+    // Fall back to Bun's native compression if available
+    const bun = (globalThis as { Bun?: { deflateSync?: (data: Uint8Array) => Uint8Array } }).Bun;
+    if (bun?.deflateSync) {
+        return bun.deflateSync(data);
     }
 
-    return result;
+    // Fall back to Node.js zlib (for older Node.js versions)
+    const nodeProcess = (globalThis as { process?: { versions?: { node?: string } } }).process;
+    if (nodeProcess?.versions?.node) {
+        const { deflateSync } = await import("node:zlib");
+        return deflateSync(data);
+    }
+
+    throw new Error(
+        "Compression not available. Requires CompressionStream API, Bun.deflateSync, or Node.js zlib",
+    );
 }
 
 /**
  * Decompresses data using the native Web DecompressionStream API (deflate)
+ * Falls back to Bun's native zlib or Node.js zlib when DecompressionStream is unavailable
  */
 async function decompress(data: Uint8Array): Promise<Uint8Array> {
-    const ds = new DecompressionStream("deflate");
-    const writer = ds.writable.getWriter();
-    const buffer = new Uint8Array(data);
-    writer.write(buffer);
-    writer.close();
+    // Prefer Web DecompressionStream API (works in Deno, browsers, Node.js 18+)
+    if (typeof DecompressionStream !== "undefined") {
+        const ds = new DecompressionStream("deflate");
+        const writer = ds.writable.getWriter();
+        const buffer = new Uint8Array(data);
+        writer.write(buffer);
+        writer.close();
 
-    const chunks: Uint8Array[] = [];
-    const reader = ds.readable.getReader();
+        const chunks: Uint8Array[] = [];
+        const reader = ds.readable.getReader();
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+        }
+
+        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const result = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        return result;
     }
 
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    const result = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-        result.set(chunk, offset);
-        offset += chunk.length;
+    // Fall back to Bun's native decompression if available
+    const bun = (globalThis as { Bun?: { inflateSync?: (data: Uint8Array) => Uint8Array } }).Bun;
+    if (bun?.inflateSync) {
+        return bun.inflateSync(data);
     }
 
-    return result;
+    // Fall back to Node.js zlib (for older Node.js versions)
+    const nodeProcess = (globalThis as { process?: { versions?: { node?: string } } }).process;
+    if (nodeProcess?.versions?.node) {
+        const { inflateSync } = await import("node:zlib");
+        return inflateSync(data);
+    }
+
+    throw new Error(
+        "Decompression not available. Requires DecompressionStream API, Bun.inflateSync, or Node.js zlib",
+    );
 }
 
 /**
