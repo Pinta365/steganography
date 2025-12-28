@@ -16,16 +16,45 @@ A steganography library supporting image and text steganography.
 
 ## Installation
 
-### Deno / JSR
+### JSR (Recommended)
 
 ```bash
+# Deno
 deno add jsr:@pinta365/steganography
+
+# pnpm
+pnpm i jsr:@pinta365/steganography
+
+# Bun
+bunx jsr add @pinta365/steganography
+
+# Node.js (npx)
+npx jsr add @pinta365/steganography
 ```
 
 Or import directly:
 
 ```typescript
-import { decodeText, encodeText } from "jsr:@pinta365/steganography@0.1.0";
+import { decodeText, encodeText } from "jsr:@pinta365/steganography@0.2.0";
+```
+
+### npm / Node.js / Bun
+
+```bash
+npm install @pinta365/steganography
+```
+
+Or with other package managers:
+
+```bash
+# yarn
+yarn add @pinta365/steganography
+
+# pnpm
+pnpm add @pinta365/steganography
+
+# bun
+bun add @pinta365/steganography
 ```
 
 **Note**: This library is runtime-agnostic and works on Deno, Node.js (18+), Bun, and browsers.

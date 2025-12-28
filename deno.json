@@ -1,9 +1,10 @@
 {
     "name": "@pinta365/steganography",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "exports": "./mod.ts",
     "tasks": {
-        "prepush": "deno fmt --check && deno lint && deno check mod.ts && deno test -A"
+        "prepush": "deno fmt --check && deno lint && deno check mod.ts && deno test -A",
+        "build:npm": "deno run -A scripts/build_npm.ts"
     },
     "imports": {
         "@cross/image": "jsr:@cross/image@^0.4.3",

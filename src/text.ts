@@ -74,15 +74,8 @@ async function compress(data: Uint8Array): Promise<Uint8Array> {
         return bun.deflateSync(data);
     }
 
-    // Fall back to Node.js zlib (for older Node.js versions)
-    const nodeProcess = (globalThis as { process?: { versions?: { node?: string } } }).process;
-    if (nodeProcess?.versions?.node) {
-        const { deflateSync } = await import("node:zlib");
-        return deflateSync(data);
-    }
-
     throw new Error(
-        "Compression not available. Requires CompressionStream API, Bun.deflateSync, or Node.js zlib",
+        "Compression not available. Requires CompressionStream API (Node.js 18+, Deno, browsers) or Bun.deflateSync",
     );
 }
 
@@ -125,15 +118,8 @@ async function decompress(data: Uint8Array): Promise<Uint8Array> {
         return bun.inflateSync(data);
     }
 
-    // Fall back to Node.js zlib (for older Node.js versions)
-    const nodeProcess = (globalThis as { process?: { versions?: { node?: string } } }).process;
-    if (nodeProcess?.versions?.node) {
-        const { inflateSync } = await import("node:zlib");
-        return inflateSync(data);
-    }
-
     throw new Error(
-        "Decompression not available. Requires DecompressionStream API, Bun.inflateSync, or Node.js zlib",
+        "Decompression not available. Requires DecompressionStream API (Node.js 18+, Deno, browsers) or Bun.inflateSync",
     );
 }
 
