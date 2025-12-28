@@ -68,6 +68,36 @@ const extractedMessage = extractTextFromImage(loadedImage.data);
 console.log(extractedMessage); // "Hidden secret message"
 ```
 
+### Animated Image Steganography
+
+```typescript
+import { decodeImageFrames, embedTextInImageFrames, encodeImageFrames, extractTextFromImageFrames } from "@pinta365/steganography";
+
+// Load animated GIF
+const gifData = await Deno.readFile("animated.gif");
+const multiFrame = await decodeImageFrames(gifData, "gif");
+
+// Embed message in first frame
+const message = "Hidden message";
+const stegaMultiFrame = embedTextInImageFrames(multiFrame, message, 1, "first");
+
+// Save as GIF
+const stegaGifData = await encodeImageFrames("gif", stegaMultiFrame);
+await Deno.writeFile("stega.gif", stegaGifData);
+
+// Extract message
+const decoded = await decodeImageFrames(stegaGifData, "gif");
+const extracted = extractTextFromImageFrames(decoded);
+console.log(extracted); // "Hidden message"
+```
+
+**Embedding modes**:
+
+- `"first"` - Embed only in the first frame (recommended for most cases)
+- `"all"` - Embed the same message in all frames
+- `"split"` - Distribute message across frames (useful for large messages)
+
+````
 ## Capacity and Configuration
 
 ### Capacity Calculation
@@ -91,7 +121,7 @@ interface EncodeOptions {
     maxCoverLength?: number; // Max cover text size (default: 100KB)
     strictCapacity?: boolean; // Throw error vs warn (default: true)
 }
-```
+````
 
 **Image Functions** (`embedTextInImage`, `embedDataInImage`):
 

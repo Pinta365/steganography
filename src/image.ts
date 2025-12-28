@@ -3,10 +3,10 @@
  * Supports both pixel-domain (LSB for lossless formats) and coefficient-domain (DCT for JPEG) steganography
  */
 
-import { Image, type JPEGComponentCoefficients, type JPEGQuantizedCoefficients } from "@cross/image";
+import { Image, type ImageFrame, type JPEGComponentCoefficients, type JPEGQuantizedCoefficients, type MultiFrameImageData } from "@cross/image";
 
 // Re-export Image type so users don't need to import @cross/image
-export type { Image };
+export type { Image, ImageFrame, MultiFrameImageData };
 import {
     bitsToBytes,
     bytesToBits,
@@ -570,6 +570,14 @@ export function cloneJpegCoefficients(
 }
 
 /**
+ * Embedding mode for multi-frame images
+ */
+export type MultiFrameEmbedMode =
+    | "first" // Embed only in the first frame
+    | "all" // Embed the same message in all frames
+    | "split"; // Split message across frames (distributes chunks)
+
+/**
  * Options for image encoding functions
  */
 export interface ImageEncodeOptions {
@@ -618,9 +626,8 @@ export function embedTextInImage(
         );
     }
 
-    // Calculate capacity
     const pixels = imageData.length / 4;
-    const rgbChannels = pixels * 3; // Skip alpha
+    const rgbChannels = pixels * 3;
     const capacityBytes = Math.floor((rgbChannels * bitDepth) / 8);
     const maxCapacity = options?.maxPayloadBytes ?? capacityBytes;
     const strictMode = options?.strictCapacity ?? true;
@@ -638,12 +645,10 @@ export function embedTextInImage(
         }
     }
 
-    // Prepend 4-byte length header (little-endian)
     const header = new Uint8Array(4);
     const view = new DataView(header.buffer);
     view.setUint32(0, messageBytes.length, true);
 
-    // Combine header + message
     const dataWithHeader = new Uint8Array(4 + messageBytes.length);
     dataWithHeader.set(header, 0);
     dataWithHeader.set(messageBytes, 4);
@@ -664,13 +669,11 @@ export function extractTextFromImage(
     imageData: Uint8Array,
     bitDepth: number = 1,
 ): string {
-    // First extract 4 bytes (32 bits) for length header
     const headerBits = extractLSB(imageData, 32, bitDepth);
     const headerBytes = bitsToBytes(headerBits);
     const view = new DataView(headerBytes.buffer);
     const messageLength = view.getUint32(0, true);
 
-    // Extract the actual message
     const messageBits = extractLSB(imageData, messageLength * 8, bitDepth, 32);
     const messageBytes = bitsToBytes(messageBits);
     const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -693,7 +696,6 @@ export function embedDataInImage(
     bitDepth: number = 1,
     options?: ImageEncodeOptions,
 ): Uint8Array {
-    // Validate data length
     const maxMessageLength = options?.maxMessageLength ?? MAX_MESSAGE_LENGTH;
     if (data.length > maxMessageLength) {
         throw new Error(
@@ -702,14 +704,12 @@ export function embedDataInImage(
         );
     }
 
-    // Calculate capacity
     const pixels = imageData.length / 4;
-    const rgbChannels = pixels * 3; // Skip alpha
+    const rgbChannels = pixels * 3;
     const capacityBytes = Math.floor((rgbChannels * bitDepth) / 8);
     const maxCapacity = options?.maxPayloadBytes ?? capacityBytes;
     const strictMode = options?.strictCapacity ?? true;
 
-    // Check capacity
     if (data.length > maxCapacity) {
         const message = `Data too large. ${data.length} bytes, capacity: ${maxCapacity} bytes. ` +
             `Try: smaller data, larger image, higher bitDepth (1-4), or increase maxPayloadBytes option.`;
@@ -818,7 +818,6 @@ export async function encodeImage(
     format: string,
     options?: ImageFormatEncodeOptions,
 ): Promise<Uint8Array> {
-    // @cross/image's encode method accepts options as second parameter
     return await image.encode(format, options);
 }
 
@@ -834,4 +833,581 @@ export async function encodeImage(
 export function createImage(width: number, height: number, data: Uint8Array): Image {
     // Use Image.fromRGBA() instead of constructor
     return Image.fromRGBA(width, height, data);
+}
+
+/**
+ * Decodes all frames from a multi-frame image (GIF animation, multi-page TIFF)
+ * Wrapper around @cross/image's Image.decodeFrames() to avoid requiring users to import it
+ *
+ * @param imageData - Image file data (GIF, multi-page TIFF, etc.)
+ * @param format - Optional format hint (e.g., "gif", "tiff")
+ * @returns MultiFrameImageData with all frames
+ */
+export async function decodeImageFrames(
+    imageData: Uint8Array,
+    format?: string,
+): Promise<MultiFrameImageData> {
+    if (format) {
+        return await Image.decodeFrames(imageData, format);
+    }
+    return await Image.decodeFrames(imageData);
+}
+
+/**
+ * Encodes multi-frame image data to file data
+ * Wrapper around @cross/image's Image.encodeFrames() to avoid requiring users to import it
+ *
+ * @param format - Output format (gif, tiff, etc.)
+ * @param multiFrameData - Multi-frame image data
+ * @param options - Optional encoding options (format-specific)
+ * @returns Encoded image file data
+ */
+export async function encodeImageFrames(
+    format: string,
+    multiFrameData: MultiFrameImageData,
+    options?: ImageFormatEncodeOptions,
+): Promise<Uint8Array> {
+    return await Image.encodeFrames(format, multiFrameData, options);
+}
+
+/**
+ * Helper: Embeds a text message into frames of a multi-frame image using LSB
+ * Supports three modes: first frame only, all frames (same message), or split across frames
+ * Automatically handles text-to-bits conversion
+ *
+ * @param multiFrameData - Multi-frame image data (from decodeImageFrames)
+ * @param message - Text message to embed
+ * @param bitDepth - Number of bits per pixel (1-4, default: 1). Lower values reduce artifacts in GIFs.
+ * @param mode - Embedding mode: "first" (first frame only), "all" (all frames), or "split" (distribute across frames, recommended for GIFs)
+ * @param options - Optional encoding options (capacity limits, strict mode)
+ * @returns Modified multi-frame image data with embedded message
+ */
+export function embedTextInImageFrames(
+    multiFrameData: MultiFrameImageData,
+    message: string,
+    bitDepth: number = 1,
+    mode: MultiFrameEmbedMode = "split",
+    options?: ImageEncodeOptions,
+): MultiFrameImageData {
+    const encoder = new TextEncoder();
+    const messageBytes = encoder.encode(message);
+
+    const maxMessageLength = options?.maxMessageLength ?? MAX_MESSAGE_LENGTH;
+    if (messageBytes.length > maxMessageLength) {
+        throw new Error(
+            `Message too long. ${messageBytes.length} bytes, maximum: ${maxMessageLength} bytes. ` +
+                `Increase maxMessageLength option if needed.`,
+        );
+    }
+
+    const firstFrame = multiFrameData.frames[0];
+    if (!firstFrame) {
+        throw new Error("No frames in multi-frame image data");
+    }
+
+    const largestFrame = multiFrameData.frames.reduce((largest, frame) => frame.data.length > largest.data.length ? frame : largest, firstFrame);
+
+    const pixels = largestFrame.data.length / 4;
+    const rgbChannels = pixels * 3;
+    const capacityBytes = Math.floor((rgbChannels * bitDepth) / 8);
+    const maxCapacity = options?.maxPayloadBytes ?? capacityBytes;
+    const strictMode = options?.strictCapacity ?? true;
+
+    const requiredBytes = messageBytes.length + 4;
+    if (requiredBytes > maxCapacity) {
+        const message = `Message too large. ${requiredBytes} bytes required, capacity: ${maxCapacity} bytes. ` +
+            `Try: shorter message, larger image, higher bitDepth (1-4), or increase maxPayloadBytes option.`;
+
+        if (strictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
+    }
+
+    const usableFrames = multiFrameData.frames.filter((frame) => {
+        const frameCapacity = Math.floor((frame.data.length / 4) * 3 * bitDepth / 8);
+        return frameCapacity >= 8;
+    });
+
+    if (usableFrames.length === 0) {
+        throw new Error("No frames are large enough to embed data. Need frames with at least 8 bytes capacity.");
+    }
+
+    let modifiedFrames: ImageFrame[];
+
+    if (mode === "first") {
+        const firstUsable = usableFrames[0];
+        const firstUsableIndex = multiFrameData.frames.indexOf(firstUsable);
+
+        const header = new Uint8Array(4);
+        const view = new DataView(header.buffer);
+        view.setUint32(0, messageBytes.length, true);
+
+        const dataWithHeader = new Uint8Array(4 + messageBytes.length);
+        dataWithHeader.set(header, 0);
+        dataWithHeader.set(messageBytes, 4);
+
+        const messageBits = bytesToBits(dataWithHeader);
+
+        modifiedFrames = multiFrameData.frames.map((frame, index) => {
+            if (index === firstUsableIndex) {
+                const modifiedData = embedLSB(frame.data, messageBits, bitDepth);
+                return { ...frame, data: modifiedData };
+            }
+            return frame;
+        });
+    } else if (mode === "all") {
+        const header = new Uint8Array(4);
+        const view = new DataView(header.buffer);
+        view.setUint32(0, messageBytes.length, true);
+
+        const dataWithHeader = new Uint8Array(4 + messageBytes.length);
+        dataWithHeader.set(header, 0);
+        dataWithHeader.set(messageBytes, 4);
+
+        const messageBits = bytesToBits(dataWithHeader);
+        const minFrameSize = Math.ceil((requiredBytes * 8) / (3 * bitDepth)) * 4;
+
+        modifiedFrames = multiFrameData.frames.map((frame) => {
+            if (frame.data.length < minFrameSize) {
+                return frame;
+            }
+            const modifiedData = embedLSB(frame.data, messageBits, bitDepth);
+            return { ...frame, data: modifiedData };
+        });
+    } else {
+        // Chunk header format: [4 bytes: chunk index][4 bytes: total chunks][4 bytes: chunk size][chunk data]
+        const chunkHeaderSize = 12;
+        const totalMessageSize = messageBytes.length + 4;
+
+        const frameCapacities = usableFrames.map((frame) => {
+            const totalCapacity = Math.floor((frame.data.length / 4) * 3 * bitDepth / 8);
+            return Math.max(0, totalCapacity - chunkHeaderSize); // Subtract chunk header size
+        });
+
+        const totalCapacity = frameCapacities.reduce((sum, cap) => sum + cap, 0);
+
+        if (totalCapacity < totalMessageSize) {
+            throw new Error(
+                `Message too large to split across frames. ` +
+                    `Required: ${totalMessageSize} bytes, available: ${totalCapacity} bytes. ` +
+                    `Try: shorter message, larger frames, higher bitDepth, or use mode "first" or "all".`,
+            );
+        }
+
+        const header = new Uint8Array(4);
+        const view = new DataView(header.buffer);
+        view.setUint32(0, messageBytes.length, true);
+
+        const dataWithHeader = new Uint8Array(4 + messageBytes.length);
+        dataWithHeader.set(header, 0);
+        dataWithHeader.set(messageBytes, 4);
+
+        let dataOffset = 0;
+        const chunks: Array<{ frameIndex: number; chunkData: Uint8Array }> = [];
+
+        for (let i = 0; i < usableFrames.length && dataOffset < dataWithHeader.length; i++) {
+            const frameCapacity = frameCapacities[i];
+            const chunkSize = Math.min(frameCapacity, dataWithHeader.length - dataOffset);
+
+            if (chunkSize > 0) {
+                const chunkData = dataWithHeader.slice(dataOffset, dataOffset + chunkSize);
+                chunks.push({
+                    frameIndex: multiFrameData.frames.indexOf(usableFrames[i]),
+                    chunkData,
+                });
+                dataOffset += chunkSize;
+            }
+        }
+
+        modifiedFrames = multiFrameData.frames.map((frame, index) => {
+            const chunk = chunks.find((c) => c.frameIndex === index);
+            if (!chunk) {
+                return frame;
+            }
+
+            // Create chunk header: [chunk index][total chunks][chunk size]
+            const chunkHeader = new Uint8Array(chunkHeaderSize);
+            const chunkView = new DataView(chunkHeader.buffer);
+            const chunkIndex = chunks.indexOf(chunk);
+            chunkView.setUint32(0, chunkIndex, true);
+            chunkView.setUint32(4, chunks.length, true);
+            chunkView.setUint32(8, chunk.chunkData.length, true);
+
+            const chunkWithHeader = new Uint8Array(chunkHeaderSize + chunk.chunkData.length);
+            chunkWithHeader.set(chunkHeader, 0);
+            chunkWithHeader.set(chunk.chunkData, chunkHeaderSize);
+
+            const chunkBits = bytesToBits(chunkWithHeader);
+            const modifiedData = embedLSB(frame.data, chunkBits, bitDepth);
+            return { ...frame, data: modifiedData };
+        });
+    }
+
+    return {
+        ...multiFrameData,
+        frames: modifiedFrames,
+    };
+}
+
+/**
+ * Helper: Extracts a text message from frames of a multi-frame image using LSB
+ * Auto-detects embedding mode (first, all, or split) and extracts accordingly
+ * Automatically handles bits-to-text conversion
+ *
+ * @param multiFrameData - Multi-frame image data (from decodeImageFrames)
+ * @param bitDepth - Number of bits per pixel (1-4, default: 1)
+ * @param frameIndex - Frame index to extract from (for "first" or "all" mode, default: 0)
+ * @returns Extracted text message
+ */
+export function extractTextFromImageFrames(
+    multiFrameData: MultiFrameImageData,
+    bitDepth: number = 1,
+    frameIndex: number = 0,
+): string {
+    // Chunk header format: [4 bytes: chunk index][4 bytes: total chunks][4 bytes: chunk size]
+    const chunkHeaderSize = 12 * 8;
+
+    let isSplitMode = false;
+    let totalChunks = 0;
+
+    for (let i = 0; i < Math.min(5, multiFrameData.frames.length); i++) {
+        const frame = multiFrameData.frames[i];
+        if (frame.data.length < chunkHeaderSize / 8) continue;
+
+        try {
+            const headerBits = extractLSB(frame.data, chunkHeaderSize, bitDepth);
+            const headerBytes = bitsToBytes(headerBits);
+            const view = new DataView(headerBytes.buffer);
+            const chunkIndex = view.getUint32(0, true);
+            const chunks = view.getUint32(4, true);
+            const chunkSize = view.getUint32(8, true);
+
+            if (chunkIndex < chunks && chunks > 0 && chunks < 10000 && chunkSize > 0 && chunkSize < 1000000) {
+                isSplitMode = true;
+                totalChunks = chunks;
+                break;
+            }
+        } catch {
+            // Not split mode, continue
+        }
+    }
+
+    if (isSplitMode && totalChunks > 0) {
+        const chunks: Array<{ index: number; data: Uint8Array }> = [];
+
+        for (const frame of multiFrameData.frames) {
+            if (frame.data.length < chunkHeaderSize / 8) continue;
+
+            try {
+                const headerBits = extractLSB(frame.data, chunkHeaderSize, bitDepth);
+                const headerBytes = bitsToBytes(headerBits);
+                const view = new DataView(headerBytes.buffer);
+                const chunkIndex = view.getUint32(0, true);
+                const totalChunks = view.getUint32(4, true);
+                const chunkSize = view.getUint32(8, true);
+
+                if (chunkIndex >= totalChunks || chunkSize === 0 || chunkSize > 1000000) continue;
+
+                const chunkDataBits = extractLSB(frame.data, chunkSize * 8, bitDepth, chunkHeaderSize);
+                const chunkData = bitsToBytes(chunkDataBits);
+
+                if (chunkData.length === chunkSize) {
+                    chunks.push({ index: chunkIndex, data: chunkData });
+                }
+            } catch {
+                // Skip invalid chunks
+            }
+        }
+
+        chunks.sort((a, b) => a.index - b.index);
+
+        if (chunks.length === 0) {
+            throw new Error("No valid chunks found. The image may not contain split-mode embedded data.");
+        }
+
+        const totalSize = chunks.reduce((sum, chunk) => sum + chunk.data.length, 0);
+        const combined = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const chunk of chunks) {
+            combined.set(chunk.data, offset);
+            offset += chunk.data.length;
+        }
+
+        const view = new DataView(combined.buffer);
+        const messageLength = view.getUint32(0, true);
+        const messageBytes = combined.slice(4, 4 + messageLength);
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        return decoder.decode(messageBytes);
+    } else {
+        const frame = multiFrameData.frames[frameIndex];
+        if (!frame) {
+            throw new Error(`Frame index ${frameIndex} out of range. Total frames: ${multiFrameData.frames.length}`);
+        }
+
+        const headerBits = extractLSB(frame.data, 32, bitDepth);
+        const headerBytes = bitsToBytes(headerBits);
+        const view = new DataView(headerBytes.buffer);
+        const messageLength = view.getUint32(0, true);
+
+        const messageBits = extractLSB(frame.data, messageLength * 8, bitDepth, 32);
+        const messageBytes = bitsToBytes(messageBits);
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        return decoder.decode(messageBytes);
+    }
+}
+
+/**
+ * Helper: Embeds binary data into frames of a multi-frame image using LSB
+ * Supports three modes: first frame only, all frames (same data), or split across frames
+ * Automatically handles bytes-to-bits conversion
+ *
+ * @param multiFrameData - Multi-frame image data (from decodeImageFrames)
+ * @param data - Binary data to embed (Uint8Array)
+ * @param bitDepth - Number of bits per pixel (1-4, default: 1)
+ * @param mode - Embedding mode: "first" (first frame only), "all" (all frames), or "split" (distribute across frames)
+ * @param options - Optional encoding options (capacity limits, strict mode)
+ * @returns Modified multi-frame image data with embedded data
+ */
+export function embedDataInImageFrames(
+    multiFrameData: MultiFrameImageData,
+    data: Uint8Array,
+    bitDepth: number = 1,
+    mode: MultiFrameEmbedMode = "split",
+    options?: ImageEncodeOptions,
+): MultiFrameImageData {
+    const maxMessageLength = options?.maxMessageLength ?? MAX_MESSAGE_LENGTH;
+    if (data.length > maxMessageLength) {
+        throw new Error(
+            `Data too large. ${data.length} bytes, maximum: ${maxMessageLength} bytes. ` +
+                `Increase maxMessageLength option if needed.`,
+        );
+    }
+
+    // Filter frames that are large enough
+    const usableFrames = multiFrameData.frames.filter((frame) => {
+        const frameCapacity = Math.floor((frame.data.length / 4) * 3 * bitDepth / 8);
+        return frameCapacity >= 8;
+    });
+
+    if (usableFrames.length === 0) {
+        throw new Error("No frames are large enough to embed data. Need frames with at least 8 bytes capacity.");
+    }
+
+    const firstUsableFrame = multiFrameData.frames[0];
+    if (!firstUsableFrame) {
+        throw new Error("No frames in multi-frame image data");
+    }
+
+    const largestUsableFrame = multiFrameData.frames.reduce(
+        (largest, frame) => frame.data.length > largest.data.length ? frame : largest,
+        firstUsableFrame,
+    );
+
+    const largestPixels = largestUsableFrame.data.length / 4;
+    const largestRgbChannels = largestPixels * 3;
+    const largestCapacityBytes = Math.floor((largestRgbChannels * bitDepth) / 8);
+    const maxDataCapacity = options?.maxPayloadBytes ?? largestCapacityBytes;
+    const dataStrictMode = options?.strictCapacity ?? true;
+
+    if (mode !== "split" && data.length > maxDataCapacity) {
+        const message = `Data too large. ${data.length} bytes, capacity: ${maxDataCapacity} bytes. ` +
+            `Try: smaller data, larger image, higher bitDepth (1-4), or increase maxPayloadBytes option.`;
+
+        if (dataStrictMode) {
+            throw new Error(message);
+        } else {
+            console.warn(`⚠ ${message} Proceeding anyway...`);
+        }
+    }
+
+    let modifiedFrames: ImageFrame[];
+
+    if (mode === "first") {
+        const firstUsable = usableFrames[0];
+        const firstUsableIndex = multiFrameData.frames.indexOf(firstUsable);
+        const dataBits = bytesToBits(data);
+
+        modifiedFrames = multiFrameData.frames.map((frame, index) => {
+            if (index === firstUsableIndex) {
+                const modifiedData = embedLSB(frame.data, dataBits, bitDepth);
+                return { ...frame, data: modifiedData };
+            }
+            return frame;
+        });
+    } else if (mode === "all") {
+        const dataBits = bytesToBits(data);
+        const minFrameSize = Math.ceil((data.length * 8) / (3 * bitDepth)) * 4;
+
+        modifiedFrames = multiFrameData.frames.map((frame) => {
+            if (frame.data.length < minFrameSize) {
+                return frame;
+            }
+            const modifiedData = embedLSB(frame.data, dataBits, bitDepth);
+            return { ...frame, data: modifiedData };
+        });
+    } else {
+        // mode === "split": Distribute data chunks across frames
+        const chunkHeaderSize = 12;
+        const totalDataSize = data.length;
+
+        const frameCapacities = usableFrames.map((frame) => {
+            const totalCapacity = Math.floor((frame.data.length / 4) * 3 * bitDepth / 8);
+            return Math.max(0, totalCapacity - chunkHeaderSize);
+        });
+
+        const totalCapacity = frameCapacities.reduce((sum, cap) => sum + cap, 0);
+
+        if (totalCapacity < totalDataSize) {
+            throw new Error(
+                `Data too large to split across frames. ` +
+                    `Required: ${totalDataSize} bytes, available: ${totalCapacity} bytes. ` +
+                    `Try: smaller data, larger frames, higher bitDepth, or use mode "first" or "all".`,
+            );
+        }
+
+        let dataOffset = 0;
+        const chunks: Array<{ frameIndex: number; chunkData: Uint8Array }> = [];
+
+        for (let i = 0; i < usableFrames.length && dataOffset < data.length; i++) {
+            const frameCapacity = frameCapacities[i];
+            const chunkSize = Math.min(frameCapacity, data.length - dataOffset);
+
+            if (chunkSize > 0) {
+                const chunkData = data.slice(dataOffset, dataOffset + chunkSize);
+                chunks.push({
+                    frameIndex: multiFrameData.frames.indexOf(usableFrames[i]),
+                    chunkData,
+                });
+                dataOffset += chunkSize;
+            }
+        }
+
+        modifiedFrames = multiFrameData.frames.map((frame, index) => {
+            const chunk = chunks.find((c) => c.frameIndex === index);
+            if (!chunk) {
+                return frame;
+            }
+
+            // Create chunk header: [chunk index][total chunks][chunk size]
+            const chunkHeader = new Uint8Array(chunkHeaderSize);
+            const chunkView = new DataView(chunkHeader.buffer);
+            const chunkIndex = chunks.indexOf(chunk);
+            chunkView.setUint32(0, chunkIndex, true);
+            chunkView.setUint32(4, chunks.length, true);
+            chunkView.setUint32(8, chunk.chunkData.length, true);
+
+            const chunkWithHeader = new Uint8Array(chunkHeaderSize + chunk.chunkData.length);
+            chunkWithHeader.set(chunkHeader, 0);
+            chunkWithHeader.set(chunk.chunkData, chunkHeaderSize);
+
+            const chunkBits = bytesToBits(chunkWithHeader);
+            const modifiedData = embedLSB(frame.data, chunkBits, bitDepth);
+            return { ...frame, data: modifiedData };
+        });
+    }
+
+    return {
+        ...multiFrameData,
+        frames: modifiedFrames,
+    };
+}
+
+/**
+ * Helper: Extracts binary data from frames of a multi-frame image using LSB
+ * Auto-detects embedding mode (first, all, or split) and extracts accordingly
+ * Automatically handles bits-to-bytes conversion
+ *
+ * @param multiFrameData - Multi-frame image data (from decodeImageFrames)
+ * @param dataLength - Length of the data in bytes (for "first" or "all" mode)
+ * @param bitDepth - Number of bits per pixel (1-4, default: 1)
+ * @param frameIndex - Frame index to extract from (for "first" or "all" mode, default: 0)
+ * @returns Extracted binary data
+ */
+export function extractDataFromImageFrames(
+    multiFrameData: MultiFrameImageData,
+    dataLength: number,
+    bitDepth: number = 1,
+    frameIndex: number = 0,
+): Uint8Array {
+    const chunkHeaderSize = 12 * 8;
+
+    let isSplitMode = false;
+    let totalChunks = 0;
+
+    for (let i = 0; i < Math.min(5, multiFrameData.frames.length); i++) {
+        const frame = multiFrameData.frames[i];
+        if (frame.data.length < chunkHeaderSize / 8) continue;
+
+        try {
+            const headerBits = extractLSB(frame.data, chunkHeaderSize, bitDepth);
+            const headerBytes = bitsToBytes(headerBits);
+            const view = new DataView(headerBytes.buffer);
+            const chunkIndex = view.getUint32(0, true);
+            const chunks = view.getUint32(4, true);
+            const chunkSize = view.getUint32(8, true);
+
+            if (chunkIndex < chunks && chunks > 0 && chunks < 10000 && chunkSize > 0 && chunkSize < 1000000) {
+                isSplitMode = true;
+                totalChunks = chunks;
+                break;
+            }
+        } catch {
+            // Not split mode, continue
+        }
+    }
+
+    if (isSplitMode && totalChunks > 0) {
+        const chunks: Array<{ index: number; data: Uint8Array }> = [];
+
+        for (const frame of multiFrameData.frames) {
+            if (frame.data.length < chunkHeaderSize / 8) continue;
+
+            try {
+                const headerBits = extractLSB(frame.data, chunkHeaderSize, bitDepth);
+                const headerBytes = bitsToBytes(headerBits);
+                const view = new DataView(headerBytes.buffer);
+                const chunkIndex = view.getUint32(0, true);
+                const totalChunks = view.getUint32(4, true);
+                const chunkSize = view.getUint32(8, true);
+
+                if (chunkIndex >= totalChunks || chunkSize === 0 || chunkSize > 1000000) continue;
+
+                const chunkDataBits = extractLSB(frame.data, chunkSize * 8, bitDepth, chunkHeaderSize);
+                const chunkData = bitsToBytes(chunkDataBits);
+
+                if (chunkData.length === chunkSize) {
+                    chunks.push({ index: chunkIndex, data: chunkData });
+                }
+            } catch {
+                // Skip invalid chunks
+            }
+        }
+
+        chunks.sort((a, b) => a.index - b.index);
+
+        if (chunks.length === 0) {
+            throw new Error("No valid chunks found. The image may not contain split-mode embedded data.");
+        }
+
+        const totalSize = chunks.reduce((sum, chunk) => sum + chunk.data.length, 0);
+        const combined = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const chunk of chunks) {
+            combined.set(chunk.data, offset);
+            offset += chunk.data.length;
+        }
+
+        return combined;
+    } else {
+        const frame = multiFrameData.frames[frameIndex];
+        if (!frame) {
+            throw new Error(`Frame index ${frameIndex} out of range. Total frames: ${multiFrameData.frames.length}`);
+        }
+
+        const bitCount = dataLength * 8;
+        const extractedBits = extractLSB(frame.data, bitCount, bitDepth);
+        return bitsToBytes(extractedBits);
+    }
 }

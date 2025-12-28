@@ -391,7 +391,6 @@ export async function encodeText(
         );
     }
 
-    // Check capacity before compression/encryption
     const calculatedCapacity = calculateTextCapacity(coverText);
     const capacity = options?.maxPayloadBytes ?? calculatedCapacity;
     const strictMode = options?.strictCapacity ?? true;
