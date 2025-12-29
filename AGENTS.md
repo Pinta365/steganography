@@ -90,6 +90,7 @@ These files are gitignored and can be modified freely for development.
 - **Local testing**: `local_test/` (gitignored, for development)
 - **References**: `references/cross-image-package/` for looking up `@cross/image` implementation details
 - **Documentation**: `README.md` for user-facing documentation
+- **Changelog**: `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format
 
 ### Dependencies
 
@@ -111,6 +112,16 @@ These files are gitignored and can be modified freely for development.
 - **Type Safety**: Use branded types where appropriate (e.g., `StegaText`)
 - **Options Objects**: Use optional options objects for configuration (e.g., `EncodeOptions`, `ImageEncodeOptions`)
 - **Capacity**: Always validate capacity and provide helpful error messages with suggestions
+
+### Changelog Maintenance
+
+- **CHANGELOG.md**: Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format
+- Update the `[Unreleased]` section with changes as they are made
+- When releasing a new version:
+  1. Move `[Unreleased]` changes to a new version section with date
+  2. Add version comparison links at the bottom
+  3. Update the `[Unreleased]` link to compare from the new version
+- Use standard categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`
 
 ### Future Work
 
