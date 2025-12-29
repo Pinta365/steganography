@@ -23,12 +23,12 @@ await build({
         license: "MIT",
         repository: {
             type: "git",
-            url: "git+https://github.com/pinta365/steganography.git",
+            url: "git+https://github.com/Pinta365/steganography.git",
         },
         bugs: {
-            url: "https://github.com/pinta365/steganography/issues",
+            url: "https://github.com/Pinta365/steganography/issues",
         },
-        homepage: "https://github.com/pinta365/steganography",
+        homepage: "https://github.com/Pinta365/steganography",
         keywords: [
             "steganography",
             "stega",
